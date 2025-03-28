@@ -1,9 +1,17 @@
 import { Controller, Get, Query, Req, Res, HttpStatus, Logger } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { QuickbooksService } from './quickbooks.service';
 import { PrismaService } from '../../database/prisma.service';
 import { Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
+import {
+  ProfitAndLossQueryDto,
+  QuickbooksCallbackQueryDto,
+  ConnectionResponseDto,
+  ErrorResponseDto,
+} from './dto/quickbooks.dto';
 
+@ApiTags('quickbooks')
 @Controller('quickbooks')
 export class QuickbooksController {
   private readonly logger = new Logger(QuickbooksController.name);
@@ -13,6 +21,11 @@ export class QuickbooksController {
     private readonly prisma: PrismaService,
   ) {}
 
+  @ApiOperation({ summary: 'Initiate QuickBooks OAuth flow' })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirects to QuickBooks authorization page',
+  })
   @Get('authorize')
   async authorize(@Req() req: Request, @Res() res: Response) {
     // In a real application, you'd get the userId from the session
@@ -40,11 +53,25 @@ export class QuickbooksController {
     return res.redirect(authUrl);
   }
 
+  @ApiOperation({ summary: 'Handle QuickBooks OAuth callback' })
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully connected to QuickBooks',
+    type: ConnectionResponseDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    type: ErrorResponseDto,
+  })
   @Get('callback')
   async callback(
-    @Query('code') code: string,
-    @Query('realmId') realmId: string,
-    @Query('state') state: string,
+    @Query() queryParams: QuickbooksCallbackQueryDto,
     @Res() res: Response,
   ) {
     try {
@@ -52,7 +79,7 @@ export class QuickbooksController {
       // For demo purposes, we'll skip this step
 
       // Get the tokens from QuickBooks
-      const tokens = await this.quickbooksService.getTokens(code);
+      const tokens = await this.quickbooksService.getTokens(queryParams.code);
 
       // In a real app, get the userId from session
       // For demonstration, we'll use our test user
@@ -76,7 +103,7 @@ export class QuickbooksController {
           data: {
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
-            realmId,
+            realmId: queryParams.realmId,
           },
         });
       } else {
@@ -85,7 +112,7 @@ export class QuickbooksController {
             userId: user.id,
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
-            realmId,
+            realmId: queryParams.realmId,
           },
         });
       }
@@ -102,10 +129,24 @@ export class QuickbooksController {
     }
   }
 
+  @ApiOperation({ summary: 'Get profit and loss report' })
+  @ApiResponse({
+    status: 200,
+    description: 'Profit and loss report data',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    type: ErrorResponseDto,
+  })
   @Get('pnl')
   async getProfitAndLoss(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
+    @Query() query: ProfitAndLossQueryDto,
     @Res() res: Response,
   ) {
     try {
@@ -121,8 +162,8 @@ export class QuickbooksController {
 
       const data = await this.quickbooksService.getProfitAndLoss(
         user.id,
-        startDate || '2023-01-01',
-        endDate || '2023-12-31',
+        query.startDate || '2023-01-01',
+        query.endDate || '2023-12-31',
       );
 
       return res.status(HttpStatus.OK).json(data);
