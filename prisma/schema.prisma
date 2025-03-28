@@ -19,6 +19,7 @@ model User {
   updatedAt             DateTime               @updatedAt
   quickbooksConnection  QuickBooksConnection?
   conversations         Conversation[]
+  slackBotInstallations SlackBotInstallation[]
 }
 
 model QuickBooksConnection {
@@ -48,4 +49,28 @@ model Message {
   content        String
   role          String       // 'user' or 'assistant'
   createdAt     DateTime     @default(now())
+}
+
+model SlackWorkspace {
+  id          String                @id
+  name        String
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  installations SlackBotInstallation[]
+}
+
+model SlackBotInstallation {
+  id            String         @id @default(uuid())
+  teamId        String
+  userId        String
+  botUserId     String
+  botToken      String
+  refreshToken  String?
+  scope         String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  user          User           @relation(fields: [userId], references: [id])
+  workspace     SlackWorkspace @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, userId])
 } 
