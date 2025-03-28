@@ -196,7 +196,7 @@ export class QuickbooksService {
   /**
    * Get a valid access token, refreshing if necessary
    */
-  private async getValidAccessToken(userId: string): Promise<string> {
+  public async getValidAccessToken(userId: string): Promise<string> {
     const connection = await this.prisma.quickBooksConnection.findFirst({
       where: { userId },
     });
