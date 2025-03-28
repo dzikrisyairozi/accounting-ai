@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './database/prisma.module';
-import { PrismaService } from './database/prisma.service';
+import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 
 @Module({
   imports: [
@@ -12,10 +12,9 @@ import { PrismaService } from './database/prisma.service';
       envFilePath: '.env',
     }),
     PrismaModule,
+    QuickbooksModule,
   ],
   controllers: [AppController],
-  providers: [AppService, PrismaService],
+  providers: [AppService],
 })
-export class AppModule {
-  constructor(private prisma: PrismaService) {}
-}
+export class AppModule {}
