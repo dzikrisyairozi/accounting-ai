@@ -9,7 +9,8 @@ import * as querystring from 'querystring';
 export class QuickbooksService {
   private readonly logger = new Logger(QuickbooksService.name);
   private readonly baseUrl = 'https://sandbox-quickbooks.api.intuit.com/v3/company';
-  private readonly oauthBaseUrl = 'https://oauth.platform.intuit.com/oauth2/v1';
+  private readonly oauthBaseUrl = 'https://appcenter.intuit.com/connect/oauth2';
+  private readonly tokenUrl = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 
   constructor(
     private readonly httpService: HttpService,
@@ -23,7 +24,10 @@ export class QuickbooksService {
   getAuthorizationUrl(state: string): string {
     const clientId = this.configService.get<string>('QUICKBOOKS_CLIENT_ID');
     const redirectUri = this.configService.get<string>('QUICKBOOKS_REDIRECT_URI');
-
+    
+    this.logger.log(`Generating authorization URL with client ID: ${clientId}`);
+    this.logger.log(`Redirect URI: ${redirectUri}`);
+    
     const params = {
       client_id: clientId,
       response_type: 'code',
@@ -31,8 +35,11 @@ export class QuickbooksService {
       redirect_uri: redirectUri,
       state,
     };
-
-    return `${this.oauthBaseUrl}/authorize?${querystring.stringify(params)}`;
+    
+    const authUrl = `${this.oauthBaseUrl}?${querystring.stringify(params)}`;
+    this.logger.log(`Generated authorization URL: ${authUrl}`);
+    
+    return authUrl;
   }
 
   /**
@@ -46,11 +53,15 @@ export class QuickbooksService {
     const clientId = this.configService.get<string>('QUICKBOOKS_CLIENT_ID');
     const clientSecret = this.configService.get<string>('QUICKBOOKS_CLIENT_SECRET');
     const redirectUri = this.configService.get<string>('QUICKBOOKS_REDIRECT_URI');
+    
+    this.logger.log(`Exchanging code for tokens with client ID: ${clientId}`);
+    this.logger.log(`Code: ${code}`);
+    this.logger.log(`Redirect URI: ${redirectUri}`);
 
     try {
       const response = await firstValueFrom(
         this.httpService.post(
-          `${this.oauthBaseUrl}/token`,
+          this.tokenUrl,
           querystring.stringify({
             grant_type: 'authorization_code',
             code,
@@ -65,13 +76,28 @@ export class QuickbooksService {
         ),
       );
 
+      this.logger.log('Token response received. Keys: ' + Object.keys(response.data).join(', '));
+      
+      // Make sure we have the required fields
+      if (!response.data.access_token) {
+        throw new Error('Access token missing from response');
+      }
+      
+      if (!response.data.refresh_token) {
+        throw new Error('Refresh token missing from response');
+      }
+      
       return {
         accessToken: response.data.access_token,
         refreshToken: response.data.refresh_token,
-        realmId: response.data.realmId,
+        realmId: response.data.realmId || '',  // Default to empty string if missing
       };
     } catch (error) {
       this.logger.error('Error exchanging authorization code for tokens', error);
+      if (error.response) {
+        this.logger.error('Response data:', error.response.data);
+        this.logger.error('Response status:', error.response.status);
+      }
       throw error;
     }
   }
@@ -91,10 +117,12 @@ export class QuickbooksService {
 
       const clientId = this.configService.get<string>('QUICKBOOKS_CLIENT_ID');
       const clientSecret = this.configService.get<string>('QUICKBOOKS_CLIENT_SECRET');
+      
+      this.logger.log(`Refreshing token for user ${userId}`);
 
       const response = await firstValueFrom(
         this.httpService.post(
-          `${this.oauthBaseUrl}/token`,
+          this.tokenUrl,
           querystring.stringify({
             grant_type: 'refresh_token',
             refresh_token: connection.refreshToken,
@@ -107,6 +135,8 @@ export class QuickbooksService {
           },
         ),
       );
+      
+      this.logger.log('Token refresh response received');
 
       // Update tokens in database
       await this.prisma.quickBooksConnection.update({
@@ -116,10 +146,16 @@ export class QuickbooksService {
           refreshToken: response.data.refresh_token,
         },
       });
+      
+      this.logger.log('Updated token in database');
 
       return response.data.access_token;
     } catch (error) {
       this.logger.error('Error refreshing token', error);
+      if (error.response) {
+        this.logger.error('Response data:', error.response.data);
+        this.logger.error('Response status:', error.response.status);
+      }
       throw error;
     }
   }

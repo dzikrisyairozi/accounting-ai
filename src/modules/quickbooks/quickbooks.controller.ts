@@ -21,10 +21,13 @@ export class QuickbooksController {
     private readonly prisma: PrismaService,
   ) {}
 
-  @ApiOperation({ summary: 'Initiate QuickBooks OAuth flow' })
+  @ApiOperation({ 
+    summary: 'Initiate QuickBooks OAuth flow',
+    description: 'Redirects the browser to QuickBooks authorization page. This endpoint should be opened in a browser tab, not executed from Swagger UI.'
+  })
   @ApiResponse({
     status: 302,
-    description: 'Redirects to QuickBooks authorization page',
+    description: 'Redirects to QuickBooks authorization page. Cannot be tested directly in Swagger UI - open in a new browser tab instead.',
   })
   @Get('authorize')
   async authorize(@Req() req: Request, @Res() res: Response) {
@@ -53,7 +56,10 @@ export class QuickbooksController {
     return res.redirect(authUrl);
   }
 
-  @ApiOperation({ summary: 'Handle QuickBooks OAuth callback' })
+  @ApiOperation({ 
+    summary: 'Handle QuickBooks OAuth callback',
+    description: 'Processes the response from QuickBooks after authorization'
+  })
   @ApiResponse({
     status: 200,
     description: 'Successfully connected to QuickBooks',
@@ -75,56 +81,85 @@ export class QuickbooksController {
     @Res() res: Response,
   ) {
     try {
-      // In a real app, verify the state parameter from session
-      // For demo purposes, we'll skip this step
-
+      this.logger.log(`Callback received with code, state, and realmId`);
+      this.logger.log(`RealmId: ${queryParams.realmId}`);
+      
       // Get the tokens from QuickBooks
-      const tokens = await this.quickbooksService.getTokens(queryParams.code);
-
+      let tokens;
+      try {
+        tokens = await this.quickbooksService.getTokens(queryParams.code);
+        this.logger.log('Tokens received successfully');
+      } catch (tokenError) {
+        this.logger.error('Failed to exchange code for tokens', tokenError);
+        return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ 
+          error: 'Failed to obtain QuickBooks access tokens' 
+        });
+      }
+      
       // In a real app, get the userId from session
       // For demonstration, we'll use our test user
       const user = await this.prisma.user.findFirst({
         where: { email: 'test@example.com' },
       });
-
+      
       if (!user) {
         return res.status(HttpStatus.NOT_FOUND).json({ error: 'User not found' });
       }
-
+      
+      this.logger.log(`User found: ${user.id}`);
+      
       // Check if a connection already exists
       const existingConnection = await this.prisma.quickBooksConnection.findFirst({
         where: { userId: user.id },
       });
-
-      // Update or create the connection
-      if (existingConnection) {
-        await this.prisma.quickBooksConnection.update({
-          where: { id: existingConnection.id },
-          data: {
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            realmId: queryParams.realmId,
-          },
-        });
-      } else {
-        await this.prisma.quickBooksConnection.create({
-          data: {
-            userId: user.id,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            realmId: queryParams.realmId,
-          },
+      
+      // Make sure we have both required tokens
+      if (!tokens.accessToken || !tokens.refreshToken) {
+        this.logger.error('Missing required tokens', tokens);
+        return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ 
+          error: 'Invalid token response from QuickBooks' 
         });
       }
-
-      return res.status(HttpStatus.OK).json({
-        message: 'Successfully connected to QuickBooks',
-        userId: user.id,
-      });
+      
+      // Update or create the connection
+      try {
+        if (existingConnection) {
+          this.logger.log(`Updating existing connection for user ${user.id}`);
+          await this.prisma.quickBooksConnection.update({
+            where: { id: existingConnection.id },
+            data: {
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              realmId: queryParams.realmId,
+            },
+          });
+        } else {
+          this.logger.log(`Creating new connection for user ${user.id}`);
+          await this.prisma.quickBooksConnection.create({
+            data: {
+              userId: user.id,
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              realmId: queryParams.realmId,
+            },
+          });
+        }
+        
+        this.logger.log('Connection saved successfully');
+        return res.status(HttpStatus.OK).json({ 
+          message: 'Successfully connected to QuickBooks',
+          userId: user.id,
+        });
+      } catch (dbError) {
+        this.logger.error('Database error saving connection', dbError);
+        return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ 
+          error: 'Failed to save QuickBooks connection' 
+        });
+      }
     } catch (error) {
       this.logger.error('Error in QuickBooks callback', error);
-      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-        error: 'Failed to connect to QuickBooks',
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ 
+        error: 'Failed to connect to QuickBooks' 
       });
     }
   }
